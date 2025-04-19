@@ -1,5 +1,6 @@
 #include "thread_pool.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 static void *worker_thread(void *arg);
 
@@ -85,8 +86,6 @@ void thread_pool_add_task(thread_pool_t *pool, void (*function)(void *), void *a
 
 void thread_pool_destroy(thread_pool_t *pool) {
     pool->is_running = 0;
-
-    // Push empty tasks to wake up all threads
     for (int i = 0; i < pool->num_threads; i++) {
         work_queue_push(&pool->queue, NULL, NULL);
     }
@@ -94,7 +93,6 @@ void thread_pool_destroy(thread_pool_t *pool) {
     for (int i = 0; i < pool->num_threads; i++) {
         pthread_join(pool->threads[i], NULL);
     }
-
     work_queue_destroy(&pool->queue);
     free(pool->threads);
 }

@@ -27,7 +27,5 @@ int main() {
         server_cleanup(&server);
         return EXIT_FAILURE;
     }
-
-    server_cleanup(&server);
     return 0;
 }
