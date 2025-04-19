@@ -12,7 +12,7 @@
 #define NUM_WORKERS 10
 #define MAX_CLIENTS 45
 #define BUFFER_SIZE 1024
-
+#define DIRECTORY "/home/bar0n/Documents/hp/trashttp"
 
 
 typedef struct server {
@@ -26,22 +26,31 @@ void *handle_client(void *arg) {
 
     char *buffer = (char *)malloc(BUFFER_SIZE * sizeof(char));
 
-    ssize_t bytes_read = recv(client_fd, buffer, BUFFER_SIZE, 0);
+    size_t bytes_read = recv(client_fd, buffer, BUFFER_SIZE, 0);
 
     if (bytes_read > 0) {
         regex_t regex;
         regcomp(&regex, "^GET /([^ ]*) HTTP/1.1", REG_EXTENDED);
         regmatch_t match[2];
-
         if (regexec(&regex, buffer, 2, match, 0) == 0) {
             char *filename = strndup(buffer + match[1].rm_so, match[1].rm_eo - match[1].rm_so);
+
+            if (strcmp(filename,"") == 0 || filename == NULL) {
+                printf("lol\n");
+                filename = strdup("index.html");
+            }
+
             printf("Requested file: %s\n", filename);
 
             FILE *file = fopen(filename, "r");
             if (file) {
+                const char *response_header = "HTTP/1.1 200 OK\r\n"
+                                              "Content-Type: text/html\r\n"
+                                              "Connection: close\r\n\r\n";
+                send(client_fd, response_header, strlen(response_header), 0);
                 char file_buffer[BUFFER_SIZE];
-                ssize_t bytes_read;
-                while ((bytes_read = fread(file_buffer, 1, sizeof(file_buffer), file)) > 0) {
+                bytes_read = 0;
+                while ((bytes_read = fread(file_buffer, 1, sizeof(file_buffer), file)) > (size_t)0) {
                     send(client_fd, file_buffer, bytes_read, 0);
                 }
                 fclose(file);
@@ -64,6 +73,9 @@ void *handle_client(void *arg) {
 }
 
 int main(void) {
+
+    chdir(DIRECTORY);
+
     SERVER server;
     server.server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server.server_fd <= 0) {
@@ -111,3 +123,13 @@ int main(void) {
     close(server.server_fd);
     return 0;
 }
+
+//TODO: add some form of thread scheduling
+//TODO: add many many more http features, possibly http2 with alpn as well
+//TODO: add ssl support
+//TODO: add a config file
+//TODO: add a makefile
+//TODO: add a proper logging system
+//TODO: add a proper error handling system
+//TODO: add support for not just get requests (lmfao)
+//TODO: configure reverse proxy
