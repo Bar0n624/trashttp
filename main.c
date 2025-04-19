@@ -6,12 +6,18 @@
 #include <unistd.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 #include "http.h"
+#include <signal.h>
+
 
 #define PORT 8080
 #define NUM_WORKERS 10
 #define MAX_CLIENTS 45
 #define BUFFER_SIZE 1024
+#define SSL_DIR "./ssl"
+#define CERT_FILE SSL_DIR "/cert.pem"
+#define KEY_FILE SSL_DIR "/key.pem"
 
 typedef struct server {
     int server_fd;
@@ -37,6 +43,8 @@ typedef struct {
 } thread_pool_t;
 
 thread_pool_t pool;
+SSL_CTX *ssl_ctx = NULL;
+
 
 void work_queue_init(work_queue_t *queue) {
     queue->front = queue->rear = NULL;
@@ -120,10 +128,34 @@ void handle_client_task(void *arg) {
     int client_fd = *(int *)arg;
     free(arg);
 
+    SSL *ssl = NULL;
     char buffer[BUFFER_SIZE];
-    ssize_t bytes_read = recv(client_fd, buffer, BUFFER_SIZE - 1, 0);
+    ssize_t bytes_read;
+
+    if (ssl_ctx) {
+        ssl = SSL_new(ssl_ctx);
+        if (!ssl) {
+            fprintf(stderr, "Error creating SSL structure\n");
+            close(client_fd);
+            return;
+        }
+
+        SSL_set_fd(ssl, client_fd);
+
+        if (SSL_accept(ssl) <= 0) {
+            fprintf(stderr, "SSL connection failed\n");
+            SSL_free(ssl);
+            close(client_fd);
+            return;
+        }
+
+        bytes_read = SSL_read(ssl, buffer, BUFFER_SIZE - 1);
+    } else {
+        bytes_read = recv(client_fd, buffer, BUFFER_SIZE - 1, 0);
+    }
 
     if (bytes_read <= 0) {
+        if (ssl) SSL_free(ssl);
         close(client_fd);
         return;
     }
@@ -133,15 +165,41 @@ void handle_client_task(void *arg) {
     http_request_t request;
     if (parse_http_request(buffer, &request) != 0) {
         const char *bad_request_response = "HTTP/1.1 400 Bad Request\r\n\r\n";
-        send(client_fd, bad_request_response, strlen(bad_request_response), 0);
+        if (ssl) {
+            SSL_write(ssl, bad_request_response, strlen(bad_request_response));
+            SSL_free(ssl);
+        } else {
+            send(client_fd, bad_request_response, strlen(bad_request_response), 0);
+        }
         close(client_fd);
         return;
     }
 
-    handle_http1_request(client_fd, NULL, &request);
+    handle_http1_request(client_fd, ssl, &request);
+
 }
 
-int main(void) {
+int main() {
+
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
+    SSL_load_error_strings();
+
+    struct stat cert_stat, key_stat;
+
+    if (stat(CERT_FILE, &cert_stat) != 0 || !(S_ISREG(cert_stat.st_mode)) || stat(KEY_FILE, &key_stat) != 0 || !(
+            S_ISREG(key_stat.st_mode))) {
+        printf("SSL files not found in %s, running without SSL\n", SSL_DIR);
+    } else {
+        ssl_ctx = init_ssl_context(CERT_FILE, KEY_FILE);
+        if (!ssl_ctx) {
+            fprintf(stderr, "Failed to initialize SSL context\n");
+            exit(EXIT_FAILURE);
+        }
+        printf("SSL enabled with certificate and key from %s\n", SSL_DIR);
+    }
+
+
     SERVER server;
     server.server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server.server_fd <= 0) {
@@ -186,9 +244,13 @@ int main(void) {
 
     close(server.server_fd);
     thread_pool_destroy(&pool);
+
+    if (ssl_ctx) {
+        SSL_CTX_free(ssl_ctx);
+    }
+
     return 0;
 }
-
 
 //TODO: add a config file
 //TODO: add a makefile

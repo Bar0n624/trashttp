@@ -87,6 +87,7 @@ void handle_http1_request(int client_fd, SSL *ssl, const http_request_t *request
         }
     }
 
+
     close(client_fd);
 }
 
