@@ -7,6 +7,10 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include "logger.h"
+#include <stdatomic.h>
+
+atomic_int next_thread_id = 1;
 
 typedef struct {
     int client_fd;
@@ -77,6 +81,8 @@ void handle_client_task(void *arg) {
     int buffer_size = client_args->buffer_size;
     free(client_args);
 
+    int thread_id = atomic_fetch_add(&next_thread_id, 1);
+
     SSL *ssl = NULL;
     char *buffer = malloc(buffer_size);
     if (!buffer) {
@@ -86,10 +92,16 @@ void handle_client_task(void *arg) {
 
     ssize_t bytes_read;
 
+    //log request timestamp
+    time_t request_time = time(NULL);
+    log_message("Thread %d: Received request at %s", thread_id, ctime(&request_time));
+
+
+
     if (ssl_ctx) {
         ssl = SSL_new(ssl_ctx);
         if (!ssl) {
-            fprintf(stderr, "Error creating SSL structure\n");
+            log_message(" Thread %d: Error creating SSL structure", thread_id);
             free(buffer);
             close(client_fd);
             return;
@@ -98,7 +110,7 @@ void handle_client_task(void *arg) {
         SSL_set_fd(ssl, client_fd);
 
         if (SSL_accept(ssl) <= 0) {
-            fprintf(stderr, "SSL connection failed\n");
+            log_message("Thread %d: SSL connection failed", thread_id);
             SSL_free(ssl);
             free(buffer);
             close(client_fd);
@@ -111,6 +123,7 @@ void handle_client_task(void *arg) {
     }
 
     if (bytes_read <= 0) {
+        log_message("Thread %d: Failed to read from client", thread_id);
         if (ssl) SSL_free(ssl);
         free(buffer);
         close(client_fd);
@@ -118,6 +131,7 @@ void handle_client_task(void *arg) {
     }
 
     buffer[bytes_read] = '\0';
+    log_message("Thread %d: Received request from client: %s", thread_id, buffer);
 
     http_request_t request;
     if (parse_http_request(buffer, &request) != 0) {
@@ -128,6 +142,11 @@ void handle_client_task(void *arg) {
         } else {
             send(client_fd, bad_request_response, strlen(bad_request_response), 0);
         }
+
+        //log response timestamp
+        time_t response_time = time(NULL);
+        log_message("Thread %d: Sent response at %s", thread_id, ctime(&response_time));
+
         free(buffer);
         close(client_fd);
         return;
@@ -147,7 +166,7 @@ int server_start(server_t *server) {
 
     while (1) {
         struct sockaddr_in client_addr;
-        int addrlen = sizeof(client_addr);
+        socklen_t addrlen = sizeof(client_addr);
 
         int client_fd = accept(server->server_fd, (struct sockaddr *)&client_addr, &addrlen);
         if (client_fd < 0) {

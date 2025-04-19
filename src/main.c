@@ -1,21 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
 #include "server.h"
+#include <signal.h>
+#include <stdatomic.h>
+#include "logger.h"
 
 #define CONFIG_FILE "server.conf"
 
 static server_t server;
 
-void handle_signal(int sig) {
-    printf("Shutting down server...\n");
-    server_cleanup(&server);
-    exit(0);
+volatile sig_atomic_t server_running = 1;
+
+void handle_signal(int signal) {
+    if (signal == SIGINT || signal == SIGTERM) {
+        log_message("Server shutting down due to signal %d", signal);
+        server_running = 0;
+    }
 }
 
 int main() {
-    signal(SIGINT, handle_signal);
-    signal(SIGTERM, handle_signal);
 
     if (server_init(&server, CONFIG_FILE) != 0) {
         fprintf(stderr, "Failed to initialize server\n");
