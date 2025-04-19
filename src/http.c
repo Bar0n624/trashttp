@@ -5,40 +5,18 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#define BASE_DIRECTORY "/home/bar0n/Documents/hp/trashttp"
-
-SSL_CTX *init_ssl_context(const char *cert_file, const char *key_file) {
-    if (!cert_file || !key_file) {
-        return NULL;
-    }
-
-    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
-    if (!ctx) {
-        perror("Unable to create SSL context");
-        exit(EXIT_FAILURE);
-    }
-
-    if (SSL_CTX_use_certificate_file(ctx, cert_file, SSL_FILETYPE_PEM) <= 0 ||
-        SSL_CTX_use_PrivateKey_file(ctx, key_file, SSL_FILETYPE_PEM) <= 0) {
-        perror("Unable to load certificate or private key");
-        exit(EXIT_FAILURE);
-    }
-
-    return ctx;
-}
-
 int parse_http_request(const char *buffer, http_request_t *request) {
     sscanf(buffer, "%15s %255s %15s", request->method, request->path, request->version);
     return 0;
 }
 
-void handle_http1_request(int client_fd, SSL *ssl, const http_request_t *request) {
+void handle_http1_request(int client_fd, SSL *ssl, const http_request_t *request, const char *base_directory) {
     char response[BUFFER_SIZE];
     char file_path[512];
-    snprintf(file_path, sizeof(file_path), "%s%s", BASE_DIRECTORY, request->path);
+    snprintf(file_path, sizeof(file_path), "%s%s", base_directory, request->path);
 
     if (strcmp(request->path, "/") == 0) {
-        snprintf(file_path, sizeof(file_path), "%s/index.html", BASE_DIRECTORY);
+        snprintf(file_path, sizeof(file_path), "%s/index.html", base_directory);
     }
 
     struct stat file_stat;

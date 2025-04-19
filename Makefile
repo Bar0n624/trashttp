@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -O2 -pthread
 LDFLAGS = -lssl -lcrypto
 
-SOURCES = main.c http.c
+SOURCES = ./src/main.c ./src/http.c ./src/server.c ./src/thread_pool.c ./src/ssl_utils.c ./src/config.c
 OBJECTS = $(SOURCES:.c=.o)
 TARGET = server
 
