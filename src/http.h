@@ -26,7 +26,7 @@ SSL_CTX *init_ssl_context(const char *cert_file, const char *key_file);
 
 int parse_http_request(const char *buffer, http_request_t *request);
 
-void handle_http1_request(int client_fd, SSL *ssl, const http_request_t *request);
+void handle_http1_request(int client_fd, SSL *ssl, const http_request_t *request, const char *base_directory);
 
 
 #endif
