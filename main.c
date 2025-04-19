@@ -14,12 +14,77 @@
 #define BUFFER_SIZE 1024
 #define DIRECTORY "/home/bar0n/Documents/hp/trashttp"
 
-
 typedef struct server {
     int server_fd;
     struct sockaddr_in address;
 } SERVER;
 
+typedef struct {
+    pthread_t threads[NUM_WORKERS];
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
+    int *client_fds[MAX_CLIENTS];
+    int count;
+    int head;
+    int tail;
+} thread_pool_t;
+
+thread_pool_t pool;
+
+void *handle_client(void *arg);
+
+void *worker_thread(void *arg) {
+    while (1) {
+        int *client_fd;
+
+        pthread_mutex_lock(&pool.lock);
+        while (pool.count == 0) {
+            pthread_cond_wait(&pool.cond, &pool.lock);
+        }
+
+        client_fd = pool.client_fds[pool.head];
+        pool.head = (pool.head + 1) % MAX_CLIENTS;
+        pool.count--;
+
+        pthread_mutex_unlock(&pool.lock);
+
+        handle_client((void *)client_fd);
+        free(client_fd);
+    }
+    return NULL;
+}
+
+void thread_pool_init(thread_pool_t *pool) {
+    pthread_mutex_init(&pool->lock, NULL);
+    pthread_cond_init(&pool->cond, NULL);
+    pool->count = 0;
+    pool->head = 0;
+    pool->tail = 0;
+
+    for (int i = 0; i < NUM_WORKERS; i++) {
+        pthread_create(&pool->threads[i], NULL, worker_thread, NULL);
+    }
+}
+
+void thread_pool_add_task(thread_pool_t *pool, int *client_fd) {
+    pthread_mutex_lock(&pool->lock);
+
+    pool->client_fds[pool->tail] = client_fd;
+    pool->tail = (pool->tail + 1) % MAX_CLIENTS;
+    pool->count++;
+
+    pthread_cond_signal(&pool->cond);
+    pthread_mutex_unlock(&pool->lock);
+}
+
+void thread_pool_destroy(thread_pool_t *pool) {
+    for (int i = 0; i < NUM_WORKERS; i++) {
+        pthread_cancel(pool->threads[i]);
+        pthread_join(pool->threads[i], NULL);
+    }
+    pthread_mutex_destroy(&pool->lock);
+    pthread_cond_destroy(&pool->cond);
+}
 
 void *handle_client(void *arg) {
     int client_fd = *(int *)arg;
@@ -35,8 +100,7 @@ void *handle_client(void *arg) {
         if (regexec(&regex, buffer, 2, match, 0) == 0) {
             char *filename = strndup(buffer + match[1].rm_so, match[1].rm_eo - match[1].rm_so);
 
-            if (strcmp(filename,"") == 0 || filename == NULL) {
-                printf("lol\n");
+            if (strcmp(filename, "") == 0 || filename == NULL) {
                 filename = strdup("index.html");
             }
 
@@ -65,15 +129,12 @@ void *handle_client(void *arg) {
         }
     }
 
-
-
     free(buffer);
     close(client_fd);
     return NULL;
 }
 
 int main(void) {
-
     chdir(DIRECTORY);
 
     SERVER server;
@@ -87,7 +148,7 @@ int main(void) {
     server.address.sin_addr.s_addr = INADDR_ANY;
     server.address.sin_port = htons(PORT);
 
-    int res = bind(server.server_fd, (struct sockaddr *) &server.address, sizeof(server.address));
+    int res = bind(server.server_fd, (struct sockaddr *)&server.address, sizeof(server.address));
 
     if (res < 0) {
         perror("Could not bind socket to port");
@@ -102,25 +163,27 @@ int main(void) {
     }
 
     printf("Server listening on port %d\n", PORT);
-    while(1) {
 
+    thread_pool_init(&pool);
+
+    while (1) {
         struct sockaddr_in client_addr;
         int addrlen = sizeof(client_addr);
         int *client_fd = malloc(sizeof(int));
 
-        *client_fd = accept(server.server_fd, (struct sockaddr *) &client_addr, &addrlen);
+        *client_fd = accept(server.server_fd, (struct sockaddr *)&client_addr, &addrlen);
 
         if (*client_fd < 0) {
             perror("Could not accept connection");
+            free(client_fd);
             continue;
         }
 
-        pthread_t thread_id;
-        pthread_create(&thread_id, NULL, handle_client, (void *) client_fd);
-        pthread_detach(thread_id);
+        thread_pool_add_task(&pool, client_fd);
     }
 
     close(server.server_fd);
+    thread_pool_destroy(&pool);
     return 0;
 }
 
