@@ -3,6 +3,12 @@
 
 #include <pthread.h>
 
+typedef enum {
+    SCHEDULER_ROUND_ROBIN = 0,
+    SCHEDULER_LEAST_CONNECTIONS = 1,
+    SCHEDULER_RANDOM = 2
+} scheduler_type_t;
+
 typedef struct work_item {
     void (*function)(void *arg);
     void *arg;
@@ -25,6 +31,7 @@ typedef struct {
     pthread_mutex_t *queue_locks;
     int is_running;
     int enable_work_stealing;
+    scheduler_type_t scheduler;
 } thread_pool_t;
 
 typedef struct {
@@ -32,13 +39,15 @@ typedef struct {
     int thread_id;
 } worker_args_t;
 
+scheduler_type_t get_scheduler_type(const char *scheduler_str);
+
 void work_queue_init(work_queue_t *queue);
 void work_queue_push(work_queue_t *queue, void (*function)(void *), void *arg);
 work_item_t *work_queue_pop(work_queue_t *queue);
 work_item_t *work_queue_try_pop(work_queue_t *queue);
 void work_queue_destroy(work_queue_t *queue);
 
-int thread_pool_init(thread_pool_t *pool, int num_threads, int enable_work_stealing);
+int thread_pool_init(thread_pool_t *pool, int num_threads, int enable_work_stealing, scheduler_type_t scheduler);
 void thread_pool_add_task(thread_pool_t *pool, void (*function)(void *), void *arg);
 void thread_pool_destroy(thread_pool_t *pool);
 

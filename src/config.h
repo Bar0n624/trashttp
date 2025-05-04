@@ -10,6 +10,8 @@ typedef struct {
     char ssl_key[256];
     char base_dir[256];
     int enable_work_stealing;
+    char scheduler[32];
+    char log_file[256];
 } server_config_t;
 
 int load_config(const char *filename, server_config_t *config);

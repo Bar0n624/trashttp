@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
+#include <limits.h>
 #include "server.h"
 
 
@@ -15,6 +16,20 @@ void work_queue_init(work_queue_t *queue) {
     pthread_mutex_init(&queue->lock, NULL);
     pthread_cond_init(&queue->cond, NULL);
     queue->task_count = 0;
+}
+
+scheduler_type_t get_scheduler_type(const char *scheduler_str) {
+    if (!scheduler_str) {
+        return SCHEDULER_ROUND_ROBIN;
+    }
+
+    if (strcmp(scheduler_str, "LEAST_CONNECTIONS") == 0) {
+        return SCHEDULER_LEAST_CONNECTIONS;
+    } else if (strcmp(scheduler_str, "RANDOM") == 0) {
+        return SCHEDULER_RANDOM;
+    } else {
+        return SCHEDULER_ROUND_ROBIN;
+    }
 }
 
 void work_queue_push(work_queue_t *queue, void (*function)(void *), void *arg) {
@@ -99,48 +114,63 @@ static void *worker_thread(void *arg) {
     return NULL;
 }
 
-static void *worker_thread_stealing(void *arg) {
-    const worker_args_t *worker_args = (worker_args_t *)arg;
-    thread_pool_t *pool = worker_args->pool;
-    const int thread_id = worker_args->thread_id;
-    const int queue_index = thread_id - 1;
+void thread_pool_add_task(thread_pool_t *pool, void (*function)(void *), void *arg) {
+    if (!pool->is_running) return;
 
-    while (pool->is_running) {
-        work_item_t *item = NULL;
-        item = work_queue_try_pop(&pool->local_queues[queue_index]);
+    if (!pool->enable_work_stealing) {
+        work_queue_push(&pool->queue, function, arg);
+        return;
+    }
 
-        if (!item) {
-            item = try_steal_work(pool, queue_index);
+    int queue_id = 0;
+    static int next_queue = 0;
 
-            if (!item) {
-                usleep(1000);
-                continue;
-            }
-        }
-        if (!pool->is_running && !item->function) {
-            free(item);
+    switch (pool->scheduler) {
+        case SCHEDULER_ROUND_ROBIN: {
+            queue_id = next_queue;
+            next_queue = (next_queue + 1) % pool->num_threads;
             break;
         }
 
-        if (item->function && item->arg) {
-            client_args_t *client_args = (client_args_t *)item->arg;
-            client_args->thread_id = thread_id;
+        case SCHEDULER_LEAST_CONNECTIONS: {
+            int min_tasks = INT_MAX;
+
+            for (int i = 0; i < pool->num_threads; i++) {
+                pthread_mutex_lock(&pool->local_queues[i].lock);
+                int tasks = pool->local_queues[i].task_count;
+                pthread_mutex_unlock(&pool->local_queues[i].lock);
+
+                if (tasks < min_tasks) {
+                    min_tasks = tasks;
+                    queue_id = i;
+                }
+            }
+            break;
         }
 
-        item->function(item->arg);
-        free(item);
+        case SCHEDULER_RANDOM: {
+            queue_id = rand() % pool->num_threads;
+            break;
+        }
+
+        default:
+            queue_id = next_queue;
+        next_queue = (next_queue + 1) % pool->num_threads;
+        break;
     }
 
-    return NULL;
+    work_queue_push(&pool->local_queues[queue_id], function, arg);
 }
 
-int thread_pool_init(thread_pool_t *pool, const int num_threads, const int enable_work_stealing) {
+int thread_pool_init(thread_pool_t *pool, const int num_threads, const int enable_work_stealing, scheduler_type_t scheduler) {
     pool->threads = malloc(sizeof(pthread_t) * num_threads);
+    srand(time(NULL));
     if (!pool->threads) return -1;
 
     pool->num_threads = num_threads;
     pool->is_running = 1;
     pool->enable_work_stealing = enable_work_stealing;
+    pool->scheduler = scheduler;
     work_queue_init(&pool->queue);
 
     if (enable_work_stealing) {
@@ -192,17 +222,39 @@ int thread_pool_init(thread_pool_t *pool, const int num_threads, const int enabl
     return 0;
 }
 
-void thread_pool_add_task(thread_pool_t *pool, void (*function)(void *), void *arg) {
-    if (!pool->is_running) return;
+static void *worker_thread_stealing(void *arg) {
+    const worker_args_t *worker_args = (worker_args_t *)arg;
+    thread_pool_t *pool = worker_args->pool;
+    const int thread_id = worker_args->thread_id;
+    const int queue_index = thread_id - 1;
 
-    if (pool->enable_work_stealing) {
-        static int next_queue = 0;
-        int queue_id = next_queue;
-        next_queue = (next_queue + 1) % pool->num_threads;
-        work_queue_push(&pool->local_queues[queue_id], function, arg);
-    } else {
-        work_queue_push(&pool->queue, function, arg);
+    while (pool->is_running) {
+        work_item_t *item = NULL;
+        item = work_queue_try_pop(&pool->local_queues[queue_index]);
+
+        if (!item) {
+            item = try_steal_work(pool, queue_index);
+
+            if (!item) {
+                usleep(1000);
+                continue;
+            }
+        }
+        if (!pool->is_running && !item->function) {
+            free(item);
+            break;
+        }
+
+        if (item->function && item->arg) {
+            client_args_t *client_args = (client_args_t *)item->arg;
+            client_args->thread_id = thread_id;
+        }
+
+        item->function(item->arg);
+        free(item);
     }
+
+    return NULL;
 }
 
 void thread_pool_destroy(thread_pool_t *pool) {
