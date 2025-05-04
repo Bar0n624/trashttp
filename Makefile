@@ -6,7 +6,11 @@ SOURCES = ./src/main.c ./src/http.c ./src/server.c ./src/thread_pool.c ./src/ssl
 OBJECTS = $(SOURCES:.c=.o)
 TARGET = trashttp
 
-all: $(TARGET)
+DEBUG_CFLAGS = -Wall -Wextra -O0 -pthread -g -DDEBUG
+DEBUG_OBJECTS = $(SOURCES:.c=.debug.o)
+DEBUG_TARGET = trashttp_debug
+
+all: $(TARGET) clean
 
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -14,5 +18,16 @@ $(TARGET): $(OBJECTS)
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+debug: $(DEBUG_TARGET)
+
+$(DEBUG_TARGET): $(DEBUG_OBJECTS)
+	$(CC) $(DEBUG_CFLAGS) -o $@ $^ $(LDFLAGS)
+
+%.debug.o: %.c
+	$(CC) $(DEBUG_CFLAGS) -c $< -o $@
+
+run: $(TARGET) clean
+	./$(TARGET)
+
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -f $(OBJECTS) $(DEBUG_OBJECTS) $(DEBUG_TARGET)
