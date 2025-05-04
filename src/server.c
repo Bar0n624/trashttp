@@ -65,7 +65,12 @@ int server_init(server_t *server, const char *config_file) {
         return -1;
     }
 
-    if (thread_pool_init(&server->thread_pool, server->config.num_workers) != 0) {
+    int enable_work_stealing = server->config.enable_work_stealing;
+    printf("Initializing thread pool with %d workers, work stealing %s\n",
+           server->config.num_workers,
+           enable_work_stealing ? "enabled" : "disabled");
+
+    if (thread_pool_init(&server->thread_pool, server->config.num_workers, enable_work_stealing) != 0) {
         fprintf(stderr, "Failed to initialize thread pool\n");
         close(server->server_fd);
         return -1;

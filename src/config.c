@@ -17,6 +17,7 @@ int load_config(const char *filename, server_config_t *config) {
     strcpy(config->ssl_cert, "./ssl/cert.pem");
     strcpy(config->ssl_key, "./ssl/key.pem");
     strcpy(config->base_dir, "./html");
+    config->enable_work_stealing = 0;
 
     char line[512];
     while (fgets(line, sizeof(line), file)) {
@@ -41,6 +42,8 @@ int load_config(const char *filename, server_config_t *config) {
             strncpy(config->ssl_key, value, sizeof(config->ssl_key) - 1);
         else if (strcmp(key, "base_dir") == 0)
             strncpy(config->base_dir, value, sizeof(config->base_dir) - 1);
+        else if (strcmp(key, "enable_work_stealing") == 0)
+            config->enable_work_stealing = atoi(value);
     }
 
     fclose(file);
