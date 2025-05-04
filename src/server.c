@@ -58,6 +58,8 @@ int server_init(server_t *server, const char *config_file) {
         return -1;
     }
 
+    set_log_file(server->config.log_file);
+
     int enable_work_stealing = server->config.enable_work_stealing;
     scheduler_type_t scheduler = get_scheduler_type(server->config.scheduler);
 

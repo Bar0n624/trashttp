@@ -4,9 +4,13 @@
 #include <time.h>
 #include <pthread.h>
 
-#define LOG_FILE "server.log"
-
 pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+char *LOG_FILE = "server.log";
+
+void set_log_file(char *filename) {
+  LOG_FILE = filename;
+}
 
 void log_message(const char *format, ...) {
     FILE *log_file = fopen(LOG_FILE, "a");
