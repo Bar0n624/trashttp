@@ -14,6 +14,13 @@ typedef struct {
     server_config_t config;
 } server_t;
 
+typedef struct {
+    int client_fd;
+    SSL_CTX *ssl_ctx;
+    int buffer_size;
+    int thread_id;
+} client_args_t;
+
 int server_init(server_t *server, const char *config_file);
 int server_start(server_t *server);
 void server_cleanup(server_t *server);

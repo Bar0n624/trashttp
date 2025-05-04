@@ -10,13 +10,6 @@
 #include "logger.h"
 #include <stdatomic.h>
 
-atomic_int next_thread_id = 1;
-
-typedef struct {
-    int client_fd;
-    SSL_CTX *ssl_ctx;
-    int buffer_size;
-} client_args_t;
 
 char* base_dir;
 
@@ -84,27 +77,29 @@ void handle_client_task(void *arg) {
     int client_fd = client_args->client_fd;
     SSL_CTX *ssl_ctx = client_args->ssl_ctx;
     int buffer_size = client_args->buffer_size;
+    int thread_id = client_args->thread_id;
     free(client_args);
 
-    int thread_id = atomic_fetch_add(&next_thread_id, 1);
 
     SSL *ssl = NULL;
     char *buffer = malloc(buffer_size);
     if (!buffer) {
+        log_message("[Thread %d] [ERROR] Memory allocation failed for client buffer", thread_id);
         close(client_fd);
         return;
     }
 
     ssize_t bytes_read;
-    time_t request_time = time(NULL);
-    log_message("Thread %d: Received request at %s", thread_id, ctime(&request_time));
-
-
+    struct sockaddr_in addr;
+    socklen_t addr_size = sizeof(addr);
+    getpeername(client_fd, (struct sockaddr *)&addr, &addr_size);
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &addr.sin_addr, client_ip, INET_ADDRSTRLEN);
 
     if (ssl_ctx) {
         ssl = SSL_new(ssl_ctx);
         if (!ssl) {
-            log_message(" Thread %d: Error creating SSL structure", thread_id);
+            log_message("[Thread %d] [ERROR] SSL structure creation failed", thread_id);
             free(buffer);
             close(client_fd);
             return;
@@ -113,7 +108,7 @@ void handle_client_task(void *arg) {
         SSL_set_fd(ssl, client_fd);
 
         if (SSL_accept(ssl) <= 0) {
-            log_message("Thread %d: SSL connection failed", thread_id);
+            log_message("[Thread %d] [ERROR] SSL connection failed with client %s", thread_id, client_ip);
             SSL_free(ssl);
             free(buffer);
             close(client_fd);
@@ -126,7 +121,7 @@ void handle_client_task(void *arg) {
     }
 
     if (bytes_read <= 0) {
-        log_message("Thread %d: Failed to read from client", thread_id);
+        log_message("[Thread %d] [ERROR] Failed to read from client %s", thread_id, client_ip);
         if (ssl) SSL_free(ssl);
         free(buffer);
         close(client_fd);
@@ -134,10 +129,12 @@ void handle_client_task(void *arg) {
     }
 
     buffer[bytes_read] = '\0';
-    log_message("Thread %d: Received request from client: %s", thread_id, buffer);
+    const time_t received_time = time(NULL);
+    log_message("[Thread %d] [INFO] Received request from client %s at %s: %s", thread_id, client_ip, ctime(&received_time), buffer);
 
     http_request_t request;
     if (parse_http_request(buffer, &request) != 0) {
+        log_message("[Thread %d] [ERROR] Bad request from %s", thread_id, client_ip);
         const char *bad_request_response = "HTTP/1.1 400 Bad Request\r\n\r\n";
         if (ssl) {
             SSL_write(ssl, bad_request_response, strlen(bad_request_response));
@@ -146,14 +143,13 @@ void handle_client_task(void *arg) {
             send(client_fd, bad_request_response, strlen(bad_request_response), 0);
         }
 
-        time_t response_time = time(NULL);
-        log_message("Thread %d: Sent response at %s", thread_id, ctime(&response_time));
-
         free(buffer);
         close(client_fd);
         return;
     }
 
+    const time_t response_time = time(NULL);
+    log_message("[Thread %d] [RESPONSE] Sent response %d to %s at %s Duration: %f sec\n\n", thread_id, 200, client_ip, ctime(&response_time), difftime(response_time, received_time));
     free(buffer);
     handle_http1_request(client_fd, ssl, &request, base_dir);
 }

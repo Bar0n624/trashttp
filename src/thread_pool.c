@@ -1,14 +1,14 @@
 #include "thread_pool.h"
 #include <stdlib.h>
 #include <stdio.h>
-#include <time.h>
 #include <errno.h>
 #include <unistd.h>
+#include "server.h"
 
 
 static void *worker_thread(void *arg);
 static void *worker_thread_stealing(void *arg);
-static work_item_t *try_steal_work(thread_pool_t *pool, int self_id);
+static work_item_t *try_steal_work(const thread_pool_t *pool, int self_id);
 
 void work_queue_init(work_queue_t *queue) {
     queue->front = queue->rear = NULL;
@@ -83,9 +83,16 @@ void work_queue_destroy(work_queue_t *queue) {
 }
 
 static void *worker_thread(void *arg) {
-    thread_pool_t *pool = (thread_pool_t *)arg;
+    worker_args_t *worker_args = (worker_args_t *)arg;
+    thread_pool_t *pool = worker_args->pool;
+    int thread_id = worker_args->thread_id;
+
     while (pool->is_running) {
         work_item_t *item = work_queue_pop(&pool->queue);
+        if (item->function && item->arg) {
+            client_args_t *client_args = (client_args_t *)item->arg;
+            client_args->thread_id = thread_id;
+        }
         item->function(item->arg);
         free(item);
     }
@@ -93,16 +100,17 @@ static void *worker_thread(void *arg) {
 }
 
 static void *worker_thread_stealing(void *arg) {
-    worker_args_t *worker_args = (worker_args_t *)arg;
+    const worker_args_t *worker_args = (worker_args_t *)arg;
     thread_pool_t *pool = worker_args->pool;
-    int thread_id = worker_args->thread_id;
+    const int thread_id = worker_args->thread_id;
+    const int queue_index = thread_id - 1;
 
     while (pool->is_running) {
         work_item_t *item = NULL;
-        item = work_queue_try_pop(&pool->local_queues[thread_id]);
+        item = work_queue_try_pop(&pool->local_queues[queue_index]);
 
         if (!item) {
-            item = try_steal_work(pool, thread_id);
+            item = try_steal_work(pool, queue_index);
 
             if (!item) {
                 usleep(1000);
@@ -114,16 +122,19 @@ static void *worker_thread_stealing(void *arg) {
             break;
         }
 
-        if (item->function) {
-            item->function(item->arg);
+        if (item->function && item->arg) {
+            client_args_t *client_args = (client_args_t *)item->arg;
+            client_args->thread_id = thread_id;
         }
+
+        item->function(item->arg);
         free(item);
     }
 
     return NULL;
 }
 
-int thread_pool_init(thread_pool_t *pool, int num_threads, int enable_work_stealing) {
+int thread_pool_init(thread_pool_t *pool, const int num_threads, const int enable_work_stealing) {
     pool->threads = malloc(sizeof(pthread_t) * num_threads);
     if (!pool->threads) return -1;
 
@@ -151,7 +162,7 @@ int thread_pool_init(thread_pool_t *pool, int num_threads, int enable_work_steal
                 return -1;
             }
             arg->pool = pool;
-            arg->thread_id = i;
+            arg->thread_id = i + 1;
 
             if (pthread_create(&pool->threads[i], NULL, worker_thread_stealing, arg) != 0) {
                 free(arg);
@@ -163,7 +174,15 @@ int thread_pool_init(thread_pool_t *pool, int num_threads, int enable_work_steal
         pool->local_queues = NULL;
 
         for (int i = 0; i < num_threads; i++) {
-            if (pthread_create(&pool->threads[i], NULL, worker_thread, pool) != 0) {
+            worker_args_t *arg = malloc(sizeof(worker_args_t));
+            if (!arg) {
+                thread_pool_destroy(pool);
+                return -1;
+            }
+            arg->pool = pool;
+            arg->thread_id = i + 1;
+            if (pthread_create(&pool->threads[i], NULL, worker_thread, arg) != 0) {
+                free(arg);
                 thread_pool_destroy(pool);
                 return -1;
             }
@@ -180,7 +199,6 @@ void thread_pool_add_task(thread_pool_t *pool, void (*function)(void *), void *a
         static int next_queue = 0;
         int queue_id = next_queue;
         next_queue = (next_queue + 1) % pool->num_threads;
-
         work_queue_push(&pool->local_queues[queue_id], function, arg);
     } else {
         work_queue_push(&pool->queue, function, arg);
@@ -216,7 +234,7 @@ void thread_pool_destroy(thread_pool_t *pool) {
     free(pool->threads);
 }
 
-static work_item_t *try_steal_work(thread_pool_t *pool, int self_id) {
+static work_item_t *try_steal_work(const thread_pool_t *pool, const int self_id) {
     for (int i = 0; i < pool->num_threads; i++) {
         if (i == self_id) continue;
 
