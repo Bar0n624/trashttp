@@ -1,46 +1,62 @@
-# Multithreaded Web Server
+# TrasHTTP
 
-## Overview
-This project is a multithreaded web server written in C. It is designed to handle multiple client requests simultaneously using a thread pool and a work-stealing approach for efficient thread scheduling. The server supports basic HTTP functionality and can serve files from a specified directory. It also includes SSL support for secure communication.
+A lightweight, multithreaded web server written in C, designed to handle multiple client requests simultaneously, using configurable scheduling.
 
 ## Features
-- **Multithreading**: Uses `pthreads` to handle multiple client requests concurrently.
-- **Work-Stealing Thread Pool**: Implements a custom thread pool with a work-stealing approach to balance the workload among threads.
-- **Custom Thread IDs**: Assigns custom thread IDs specific to the server, ignoring internal thread ID numbers.
-- **Configuration File**: Reads server settings from a `server.conf` file.
-- **SSL Support**: Provides secure communication using SSL/TLS.
-- **Graceful Shutdown**: Handles termination signals (`SIGINT`, `SIGTERM`) to shut down the server cleanly.
+- Multi-threaded request handling using a configurable thread pool
+- Support for HTTP and HTTPS (SSL/TLS) connections
+- Static file serving with appropriate MIME type detection
+- Configurable work stealing for improved load balancing
+- Multiple scheduling algorithms:
+   - Round Robin
+   - Least Connections
+   - Random
+- Detailed logging
+- Performance metrics for request handling duration
 
-## Project Structure
-- `src/main.c`: Entry point of the server. Initializes and starts the server.
-- `src/server.c`: Core server logic, including request handling and response generation.
-- `src/http.c`: HTTP protocol handling.
-- `src/thread_pool.c`: Implementation of the thread pool with work-stealing.
-- `src/ssl_utils.c`: SSL/TLS utilities for secure communication.
-- `src/config.c`: Configuration file parsing.
-- `src/logger.c`: Logging utilities for debugging and monitoring.
-- `Makefile`: Build instructions for the project.
-- `server.conf`: Configuration file for server settings.
+
+## Configuration
+The server can be configured through a `server.conf` file in the project root.
+
+```plaintext
+port = <server listening port>
+max_clients = <maximum number of concurrent clients>
+num_workers = <number of worker threads>
+buffer_size = <buffer size for request handling>
+base_dir = <base directory for serving files>
+ssl_cert = <path to SSL certificate>
+ssl_key = <path to SSL key>
+log_file = <path to log file>
+work_stealing = <enable/disable work stealing>
+scheduling_algorithm = <scheduling algorithm> #NOTE THIS REQUIRES WORK STEALING TO BE ENABLED
+```
+
+## Building and Running
+
+```bash
+make
+./trashttp
+```
 
 
 ## Setting Up SSL
 
-To enable SSL for secure communication in this project, follow these steps:
+To enable SSL for secure communication in this project:
 
-1. **Generate SSL Certificate and Key**:
    Use the `openssl` command to generate a self-signed certificate and private key:
    ```bash
    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout server.key -out server.crt
+   ```
 
-## Configuration
-The server reads its configuration from the `server.conf` file.
-   
-```plaintext
-port = 8080
-max_clients = 45
-num_workers = 4
-buffer_size = 1024
-base_dir = ./html
-ssl_cert = server.crt
-ssl_key = server.key
-```
+## Architecture
+
+TrasHTTP is designed to be modular and extensible. It uses a thread pool to handle requests concurrently, with a configurable number of worker threads. The server can be configured to use different scheduling algorithms for distributing requests among the worker threads.
+
+By default, the server uses the producer-consumer model, where worker threads consume tasks from a shared queue. The server can also be configured to use work stealing, allowing idle threads to "steal" tasks from busy threads, improving load balancing and resource utilization.
+
+When work stealing is enabled, the scheduling algorithm can be configured to use:
+- Round Robin: Distributes tasks evenly among threads in a circular manner.
+- Least Connections: Assigns tasks to the thread with the least number of active connections (smallest work queue).
+- Random: Randomly assigns tasks to threads, providing a simple load balancing mechanism.
+
+The server serves static files from a specified base directory, using the appropriate MIME type for each file. It also supports logging of requests to provide information about server activity.
